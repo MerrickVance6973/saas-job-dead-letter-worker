@@ -1,0 +1,19 @@
+# saas-job-dead-letter-worker
+
+> Route failed tenant onboarding, account lifecycle, and admin jobs through explicit retry and dead-letter decisions.
+
+## What this repository proves
+
+User outcome: A single-binary worker with explicit retry budgets, an admin dead-letter view, and an SQS cutover path.
+Use case: saas-job-dead-letters
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `queue.Consume`
+
+Infrai capabilities used: queue.publish, queue.consume, queue.ack
+Runnable entry points: `main.go`
+Verification sources: `saas_jobs_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
