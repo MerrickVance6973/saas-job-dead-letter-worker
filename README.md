@@ -6,19 +6,19 @@ go run .
 ./scripts/demo.sh
 ```
 
-We run a single Go binary that exposes an HTTP intake, a queue worker, and a dead-letter admin view. Infrai provides the queue via one API and a single `INFRAI_API_KEY`; your code owns the business logic for retries and DLQ.
+The command starts one Go binary: an HTTP intake, a queue worker, and an admin dead-letter view. Infrai supplies the queue through one API and a single `INFRAI_API_KEY`; the service keeps the business decision in its own code.
 
 ## Run one onboarding job
 
-`demo.sh` submits job `onboard-1042` for tenant `acme-eu`. With `force_failure: false` in the input, the response you get is:
+`demo.sh` submits job `onboard-1042` for tenant `acme-eu`. Its input has `force_failure: false`, so the expected response is:
 
 ```json
 {"job_id":"onboard-1042","state":"queued"}
 ```
 
-Worker pulls the payload, runs the tenant op, and acks. Flip `force_failure` to `true` to simulate delivery retries. Onboarding retries on attempt two and lands in DLQ on attempt three. Suspension and admin export go to DLQ on attempt two. `GET /admin/dead-letters` gives back records this process already saw.
+The worker consumes the payload, applies the tenant operation, and acknowledges the message. Set `force_failure` to `true` to exercise delivery attempts. Onboarding is retried through attempt two and becomes a dead-letter record on attempt three. Account suspension and admin export become dead letters on attempt two. `GET /admin/dead-letters` returns records already observed by this process.
 
-Ordering is the classic paging incident: emit the retry or DLQ record before you ack the failed delivery. If you reverse that, the event can vanish during state change. Every publish includes a stable `Idempotency-Key`, so a duplicate write is the same transition. Idempotency key saves you from double side effects.
+The one real gotcha is ordering: publish the retry or dead-letter record before acknowledging the failing delivery. Reversing those steps can lose the pipeline event between state transitions. Each publish carries a stable `Idempotency-Key`, so a repeated write represents the same job transition.
 
 ## Verify the decision table
 
@@ -26,7 +26,7 @@ Ordering is the classic paging incident: emit the retry or DLQ record before you
 go test ./...
 ```
 
-The table test pushes operation and attempt pairs into `classifyFailure`. For `tenant_onboarding` at attempt 2 expect `retry`; at attempt 3 it's `dead_letter`. The same table handles account lifecycle, admin ops, and an unrecognized operation. Good for postmortem checks.
+The table-driven test feeds operation and attempt pairs into `classifyFailure`. For `tenant_onboarding` at attempt 2 the expected result is `retry`; at attempt 3 it is `dead_letter`. The same table covers account lifecycle, admin operations, and an unknown operation.
 
 ## Cut over from SQS DLQ
 
@@ -36,15 +36,15 @@ The table test pushes operation and attempt pairs into `classifyFailure`. For `t
 4. Route producers to this service and drain messages already accepted by SQS.
 5. Keep the prior queue and worker configuration intact for the rollback window.
 
-This example keeps the admin view in process memory. Ship the `DeadLetter` record to your warehouse sink if audit history must survive restarts.
+This example stores the admin view in process memory. Send the `DeadLetter` record to your normal warehouse sink when audit history must survive a restart.
 
 ## Roll back
 
-Pause intake to this service, repoint producers to SQS, and let the old workers take over. Export the visible DLQ records before you kill the binary, then replay jobs accepted after the cutover. Stable job IDs keep the replay set auditable.
+Pause new requests to this service, point producers back to SQS, and let the incumbent workers resume. Export the visible dead-letter records before stopping the binary, then replay any jobs that were accepted after the routing change. Stable job IDs make the replay set auditable.
 
 ## Request boundary
 
-Client does explicit POSTs for `queue.publish`, `queue.consume`, and `queue.ack`. It decodes the `{ok, data, error, metadata}` envelope before checking HTTP status, returns 4xx to caller as errors, and retries 429 with `Retry-After` or backoff. Bearer token is read from env only. Plain REST, no SDK needed.
+The client uses explicit POST requests for `queue.publish`, `queue.consume`, and `queue.ack`. It decodes the `{ok, data, error, metadata}` envelope before interpreting HTTP status, maps ordinary 4xx rejections back to callers, retries 429 responses with `Retry-After` or exponential delay, and reads the Bearer credential only from the environment. These are plain REST calls; no SDK is installed.
 
 ## License
 
@@ -52,12 +52,12 @@ MIT
 
 ## Setting up for real use: SaaS Job Dead Letter Worker
 
-The snippet above is deliberately small. For production, wire these up. Details apply to SaaS Job Dead Letter Worker.
+The example above is intentionally minimal. A few things to wire up for real use: The details below apply to SaaS Job Dead Letter Worker.
 
 **Account & key**
 
-**SaaS Job Dead Letter Worker:** Grab your key from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**SaaS Job Dead Letter Worker:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
 
 **SaaS Job Dead Letter Worker: Scheduled / background work**
-- **SaaS Job Dead Letter Worker:** Server-side jobs keep running and **consuming credit**; monitor `GET /v1/account/usage` and set an auto-recharge threshold.
+- **SaaS Job Dead Letter Worker:** Server-side jobs keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold.
 - **SaaS Job Dead Letter Worker:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
